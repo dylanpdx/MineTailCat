@@ -18,3 +18,61 @@ forgix {
 tasks.named("mergeJars") {
     dependsOn(":fabric:jar", ":neoforge:jar")
 }
+
+// go stuff
+def minetailcatgo = file("$rootDir/minetailcat-go")
+def nativeOutputDir = file("$projectDir/common/src/main/resources/native")
+
+def goosList = [:]
+goosList["linux"] = ["amd64","arm64"]
+goosList["windows"] = ["amd64","arm64"]
+goosList["darwin"] = ["amd64","arm64"]
+
+def allTasks = []
+
+goosList.each { goos,archs ->
+    archs.each{ arch ->
+        def taskName = "buildHelper${goos.capitalize()}${arch.capitalize()}"
+        def ext = goos=="windows" ? ".exe":""
+
+        def output = file("$nativeOutputDir/${goos}/minetailcat_${arch}${ext}")
+
+        def task = tasks.register(taskName, Exec) {
+            group = "tailcat"
+            description = "build Minetailcat helper for ${goos} ${arch}"
+
+            workingDir(minetailcatgo)
+
+            // https://akrabat.com/building-go-binaries-for-different-platforms/
+            // https://go.dev/doc/install/source#environment
+            environment("GOOS", goos)
+            environment("GOARCH", arch)
+            environment("CGO_ENABLED", "0") // cross compile needs this?
+
+            commandLine("go","build","-o",output.absolutePath,".")
+
+            inputs.files(fileTree(minetailcatgo) {
+                include "**/*.go"
+                include "go.mod"
+                include "go.sum"
+            })
+
+            outputs.file(output)
+        }
+
+        allTasks.add(task)
+    }
+}
+
+tasks.register("buildHelpers") {
+    group = "tailcat"
+    description = "make minetailcat helper for all goTargets"
+    dependsOn(allTasks)
+}
+
+subprojects {
+    // idk if this is the right way to hook into the build process
+    tasks.matching { it.name == "processResources" }.configureEach {
+        dependsOn(rootProject.tasks.named("buildHelpers"))
+    }
+}
